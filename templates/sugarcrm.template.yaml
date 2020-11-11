@@ -1,0 +1,109 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SugarCRM integration for AWS Connect
+Mappings:
+  LambdaMap:
+    S3:
+      S3Path: 'connect-integration-sugarcrm/functions/packages/'
+      S3Filename: 'lambda.zip'
+  RuntimeMap:
+    Node:
+      12x: 'nodejs12.x'
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: AWS S3 configuration
+      Parameters:
+      - LambdaS3Bucket
+    - Label:
+        default: AWS Connect configuration
+      Parameters:
+      - AwsConnectInstance
+    - Label:
+        default: SugarCRM configuration
+      Parameters:
+      - SugarUsername
+      - SugarPassword
+      - SugarUrl
+Parameters:
+  SugarUsername:
+    Type: String
+    Description: SugarCRM Username for Authentication with Lambda
+  SugarPassword:
+    Type: String
+    Description: SugarCRM Password for Authentication with Lambda
+  SugarUrl:
+    Type: String
+    Description: URL of your SugarCRM Instance
+  AwsConnectInstance:
+    Type: String
+    Description: AWS Connect instance name
+  LambdaS3Bucket:
+    Type: String
+    Description: > 
+      The S3 bucket name for Lambda resources required by this template.
+      The bucket must be in the region as this CloudFormation stack
+Resources:
+  CustomLibLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes: 
+        - !FindInMap [RuntimeMap, Node, 12x]
+      Content:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key:
+          !Join
+            - ''
+            - - !FindInMap [LambdaMap, S3, S3Path]
+              - 'LibLayer/'
+              - !FindInMap [LambdaMap, S3, S3Filename]
+      Description: >
+        The custom Lambda layer library
+  CallRecordingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: AWS Lambda Function to perform actions on the call recording
+      Handler: index.handler
+      Runtime: !FindInMap [RuntimeMap, Node, 12x]
+      MemorySize: 128
+      Timeout: 60
+      Role:
+        Fn::GetAtt: S3CloudwatchLambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          sugarUsername:
+            Ref: SugarUsername
+          sugarPass:
+            Ref: SugarPassword
+          sugarUrl:
+            Ref: SugarUrl
+          awsConnectInstance:
+            Ref: AwsConnectInstance
+      Layers:
+        - !Ref CustomLibLayer
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key:
+          !Join
+            - ''
+            - - !FindInMap [LambdaMap, S3, S3Path]
+              - 'CallRecording/'
+              - !FindInMap [LambdaMap, S3, S3Filename]
+  S3CloudwatchLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      - arn:aws:iam::aws:policy/AWSLambdaExecute
